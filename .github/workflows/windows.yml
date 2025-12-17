@@ -1,0 +1,102 @@
+name: Build Windows
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      # 安装 MSYS2 与需要的 mingw 包；注意我们给 step 加 id 以便取 outputs
+      - name: Setup MSYS2 and install dependencies
+        id: msys
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-zeromq
+            mingw-w64-x86_64-libsodium
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-cppzmq
+
+      - name: Add MSYS2 mingw64 to PATH
+        shell: bash
+        run: |
+          MSYS2_PATH="${{ steps.msys.outputs.msys2-location }}"
+          echo "MSYS2_PATH=$MSYS2_PATH"
+
+          if [ ! -d "$MSYS2_PATH/mingw64" ]; then
+            echo "ERROR: mingw64 not found under MSYS2_PATH"
+            ls -l "$MSYS2_PATH"
+            exit 1
+          fi
+
+          echo "$MSYS2_PATH/mingw64/bin" >> $GITHUB_PATH
+          echo "$MSYS2_PATH/usr/bin" >> $GITHUB_PATH
+
+      - name: Sanity check ZeroMQ
+        shell: bash
+        run: |
+          MSYS2_PATH="${{ steps.msys.outputs.msys2-location }}"
+          which pkg-config
+          pkg-config --version
+
+          ls -l "$MSYS2_PATH/mingw64/include/zmq.h"
+          ls -l "$MSYS2_PATH/mingw64/lib/libzmq"*
+          pkg-config --modversion libzmq
+
+      - name: Build magnetico (Windows amd64)
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+          CC: x86_64-w64-mingw32-gcc
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          MSYS2_PATH="${{ steps.msys.outputs.msys2-location }}"
+          if [ -z "$MSYS2_PATH" ]; then
+            echo "ERROR: MSYS2_PATH empty at build time"
+            exit 1
+          fi
+
+          # 确保使用的是 MSYS2 的 pkg-config（优先）
+          export PATH="${MSYS2_PATH}/mingw64/bin:${MSYS2_PATH}/usr/bin:$PATH"
+
+          # 让 pkg-config 找到 mingw64 的 .pc，确保 cgo 的 include/lib 可见
+          export PKG_CONFIG_PATH="${MSYS2_PATH}/mingw64/lib/pkgconfig:${MSYS2_PATH}/usr/lib/pkgconfig"
+          export CGO_CFLAGS="-I${MSYS2_PATH}/mingw64/include"
+          export CGO_LDFLAGS="-L${MSYS2_PATH}/mingw64/lib"
+
+          echo "Using pkg-config from: $(which pkg-config)"
+          pkg-config --modversion libzmq || echo "libzmq pc not found; checking files directly"
+
+          echo "CGO_CFLAGS=$CGO_CFLAGS"
+          echo "CGO_LDFLAGS=$CGO_LDFLAGS"
+          go env
+
+          # 最终构建命令（含 fts5 tag）
+          go build -tags "fts5" -ldflags="-s -w" -v -o magnetico-windows-amd64.exe .
+
+      - name: Verify executable
+        shell: bash
+        run: |
+          file magnetico-windows-amd64.exe || true
+          ls -lh magnetico-windows-amd64.exe || true
+
+      - name: Upload artifact (exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: magnetico-windows-amd64
+          path: magnetico-windows-amd64.exe
