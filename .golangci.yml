@@ -1,0 +1,64 @@
+version: "2"
+
+run:
+  concurrency: 4
+  tests: true
+  allow-parallel-runners: true
+  go: '1.25'
+
+linters:
+  enable:
+    - gosec
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+
+    rules:
+
+      - linters:
+          - gosec
+        text: weak random number generator
+
+      - linters:
+          - gosec
+        text: weak cryptographic primitive
+
+      - linters:
+          - gosec
+        text: 'G115: integer overflow conversion'
+      
+      - linters:
+          - gosec
+        text: 'G602: slice index out of range'
+
+      - linters:
+          - govet
+        text: 'buildtag: \+build line is no longer needed'
+
+      - linters:
+          - staticcheck
+        text: 'ST1001: should not use dot imports'
+      
+      - linters:
+          - staticcheck
+        text: 'this check suggests that the pointer can be nil'
+        path: persistence/postgres_test.go
+
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+formatters:
+  enable:
+    - gci
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
